@@ -97,6 +97,13 @@ public class Timer {
         sched(task, firstTime.getTime(), -period);
     }
 
+    /**
+     * schedule 错过了就错过了，从现在开始计时。
+     * scheduleAtFixedRate 错过了也要从指定时间开始计时。
+     * @param task
+     * @param delay
+     * @param period
+     */
     public void scheduleAtFixedRate(TimerTask task, long delay, long period) {
         if (delay < 0) {
             throw new IllegalArgumentException("delay 必须大于0");

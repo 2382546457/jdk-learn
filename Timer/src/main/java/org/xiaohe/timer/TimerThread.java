@@ -33,7 +33,7 @@ public class TimerThread extends Thread {
             try {
                 TimerTask task;
                 boolean taskFired;
-                // TODO 这里锁整个 queue，不明白为啥。
+                // 单线程按理来说不需要锁，但是除了这个线程，还有一个main线程要往这个queue里放任务。
                 synchronized (queue) {
                     // 如果堆中没有内容，阻塞
                     while (queue.isEmpty() && newTasksMayBeScheduled) {
@@ -42,7 +42,7 @@ public class TimerThread extends Thread {
                     }
                     // 这个线程被唤醒有两种情况:
                     // 1. 堆中有任务了
-                    // 2. 被强制唤醒，线程要停止工作了，
+                    // 2. 被强制唤醒，线程要停止工作了。
                     if (queue.isEmpty()) {
                         break;
                     }
@@ -65,6 +65,10 @@ public class TimerThread extends Thread {
                                 queue.removeMin();
                                 task.state = TimerTask.EXECUTED;
                             } else {
+                                // 如果任务的 period 不为0. 有两种情况
+                                // 1. 调用 schedule 方法，period < 0.
+                                // 2. 调用 scheduleFixedRate 方法，period > 0.
+                                // 它俩的区别是：schedule错过了就错过了，从现在开始计时。scheduleFixedRate错过了也要从指定时间开始计时。
                                 queue.rescheduleMin(
                                         task.period < 0 ? currentTime - task.period : executionTime + task.period
                                 );
