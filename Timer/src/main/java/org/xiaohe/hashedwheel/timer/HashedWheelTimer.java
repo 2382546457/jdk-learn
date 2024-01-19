@@ -177,10 +177,22 @@ public class HashedWheelTimer implements Timer {
             // 刚开始的时候 tick = 0, tickDuration = 100ms
             // 所以 deadline = 100ms
             // 下一次调用这个方法，deadline 就会变成 200ms、300ms、400ms...
+            // 换言之，deadline 是从 startTime 启动后的每一个刻度（每一个时间轮），如果返回的是deadline，那么会将执行时间在deadline前的任务都执行
             long deadline = tickDuration * (tick + 1);
+            // 每一个执行waitForNextTick的时间都不一样，大致有两种情况:
+            // 1. deadline对应的时间轮的任务执行耗时较短，如 返回的deadline=100ms,任务执行了30ms，那么现在就是130ms，
+            //    但是还没有到达200ms，所以就要睡眠70ms，然后将 200ms返回
+            // 2. deadline对应的那个轮子的任务执行时间较长，如 返回的 deadline=100ms, 任务执行了120ms，那么现在就是 220ms
+            //    已经超过了200ms这个刻度，那么就不再等待，直接返回 220ms，将执行时间在220ms之前的任务都执行掉
             for (;;) {
+                // 1. currentTime = 130ms, duration = 200ms
+                // 2. currentTime = 220ms, duration = 200ms
                 final long currentTime = System.nanoTime() - startTime;
+                // 1. sleepTimeMs = 200 - 130 = 70ms
+                // 2. sleepTimeMs = 200 - 220 = -20ms
                 long sleepTimeMs = (deadline - currentTime + 999999)  / 1000000;
+                // 1. sleepTimeMs > 0，说明现在还没有走完这一刻度，要先沉睡 sleepTimeMs
+                // 2. sleepTimeMs < 0，说明现在已经超过了这一刻度，直接返回当前时间
                 if (sleepTimeMs <= 0) {
                     if (currentTime == Long.MIN_VALUE) {
                         return -Long.MAX_VALUE;
@@ -220,15 +232,20 @@ public class HashedWheelTimer implements Timer {
             // 一次最多转移 100000 个任务
             for (int i = 0; i < 100000; i++) {
                 HashedWheelTimeout timeout = timeouts.poll();
+                // 由于执行这个方法前已经执行过 processCancelledTasks，所以现在肯定不会出现任务为空或者任务状态未取消的情况
                 if (timeout == null) {
                     break;
                 }
                 if (timeout.state() == HashedWheelTimeout.ST_CANCELLED) {
                     break;
                 }
+                // 假如 timeout.deadline = 31000ms, tickDuration = 100ms, 整个时间轮一圈有60个刻度,即wheel.length=60
+                // calculated = 31000 / 100 = 310，那么这个任务需要310个刻度，但是一圈只有60个刻度
+                // 这个任务就应该转 5 圈之后放在第 10 个刻度中。
+                // timeout.remainingRounds = 310 / 60 = 5
                 long calculated = timeout.deadline / tickDuration;
                 timeout.remainingRounds = (calculated - tick) / wheel.length;
-
+                // 一般来说都是 calculated 最大，stopIndex = calculated % wheel.length = 10. 将任务放在这个刻度中
                 final long ticks = Math.max(calculated, tick);
                 int stopIndex = (int) (ticks & mask);
 
