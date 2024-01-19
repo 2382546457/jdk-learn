@@ -4,6 +4,7 @@ import org.xiaohe.hashedwheel.timeout.Timeout;
 import org.xiaohe.hashedwheel.timertask.TimerTask;
 
 import java.util.Set;
+import java.util.concurrent.TimeUnit;
 
 /**
  * @author : 小何
@@ -11,7 +12,7 @@ import java.util.Set;
  * @date : 2024-01-18 21:06
  */
 public interface Timer {
-    Timeout newTimeout(TimerTask task, long delay, Timeout unit);
+    Timeout newTimeout(TimerTask task, long delay, TimeUnit unit);
 
     /**
      * 停止所有任务

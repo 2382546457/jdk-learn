@@ -10,6 +10,7 @@ import java.util.HashSet;
 import java.util.Queue;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
@@ -60,6 +61,8 @@ public class HashedWheelTimer implements Timer {
     public final long tickDuration;
     public final HashedWheelBucket[] wheel;
     public final int mask;
+    public final Worker worker = new Worker();
+    public final Thread workerThread;
 
 
     /**
@@ -77,21 +80,31 @@ public class HashedWheelTimer implements Timer {
                             int ticksPerWheel,
                             boolean leakDetection,
                             long maxPendingTimeouts) {
-        ObjectUtil.checkNotNull(threadFactory, "threadFactory");
-        ObjectUtil.checkNotNull(unit, "unit");
-        ObjectUtil.checkPositive(tickDuration, "tickDuration");
-        ObjectUtil.checkPositive(ticksPerWheel, "ticksPerWheel");
-
-        wheel = null;
+        // 省略判断条件，都是一些判空啥的。
+        wheel = createWheel(ticksPerWheel);
         mask = wheel.length - 1;
-
         this.tickDuration = unit.toNanos(tickDuration);
         this.maxPendingTimeouts = maxPendingTimeouts;
+        workerThread = threadFactory.newThread(worker);
     }
 
     @Override
-    public Timeout newTimeout(TimerTask task, long delay, Timeout unit) {
-        return null;
+    public Timeout newTimeout(TimerTask task, long delay, TimeUnit unit) {
+        // 判空代码不写了
+        long pendingTimeoutsCount = pendingTimeouts.incrementAndGet();
+        if (maxPendingTimeouts > 0 && pendingTimeoutsCount > maxPendingTimeouts) {
+            pendingTimeouts.decrementAndGet();
+            throw new RejectedExecutionException();
+        }
+        start();
+        long deadline = System.nanoTime() + unit.toNanos(delay) - startTime;
+        // 说明这个任务的执行时间已经过去
+        if (delay > 0 && deadline < 0) {
+            deadline = Long.MAX_VALUE;
+        }
+        HashedWheelTimeout timeout = new HashedWheelTimeout(this, task, deadline);
+        timeouts.add(timeout);
+        return timeout;
     }
 
     @Override
@@ -100,7 +113,23 @@ public class HashedWheelTimer implements Timer {
     }
 
 
+    /**
+     * 启动工作线程
+     */
     public void start() {
+        switch (WORKER_STATE_UPDATER.get(this)) {
+            case WORKER_STATE_INIT:
+                if (WORKER_STATE_UPDATER.compareAndSet(this, WORKER_STATE_INIT, WORKER_STATE_STARTED)) {
+                    workerThread.start();
+                }
+                break;
+            case WORKER_STATE_STARTED:
+                break;
+            case WORKER_STATE_SHUTDOWN:
+                throw new IllegalStateException();
+            default:
+                throw new Error("Invalid WorkerState");
+        }
         // 如果 startTime 没有初始化，等待它初始化
         while (startTime == 0) {
             try {
@@ -111,7 +140,32 @@ public class HashedWheelTimer implements Timer {
         }
     }
 
+    public static HashedWheelBucket[] createWheel(int ticksPerWheel) {
+        if (ticksPerWheel <= 0) {
+            throw new IllegalArgumentException(
+                    "ticksPerWheel must be greater than 0: " + ticksPerWheel);
+        }
+        if (ticksPerWheel > 1073741824) {
+            throw new IllegalArgumentException(
+                    "ticksPerWheel may not be greater than 2^30: " + ticksPerWheel);
+        }
+        // 将ticksPerWheel转为 2^n，要跟它离得最近的而且大于它的。
+        ticksPerWheel = normalizedTicksPerWheel(ticksPerWheel);
 
+        HashedWheelBucket[] wheel = new HashedWheelBucket[ticksPerWheel];
+        for (int i = 0; i < ticksPerWheel; i++) {
+            wheel[i] = new HashedWheelBucket();
+        }
+        return wheel;
+    }
+
+    private static int normalizedTicksPerWheel(int ticksPerWheel) {
+        int normalizedTicksPerWheel = 1;
+        while (normalizedTicksPerWheel < ticksPerWheel) {
+            normalizedTicksPerWheel <<= 1;
+        }
+        return normalizedTicksPerWheel;
+    }
 
 
 
