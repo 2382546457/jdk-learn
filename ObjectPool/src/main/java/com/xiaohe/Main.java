@@ -1,12 +1,10 @@
-package com.xiaohe;
-
-/**
- * @author : 小何
+package com.xiaohe;/**
  * @Description :
- * @date : 2024-02-10 21:42
+ * @author  : 小何
+ * @date : 2024-02-12 20:12
  */
 public class Main {
     public static void main(String[] args) {
-        System.out.println("Hello world!");
+        System.gc();
     }
 }

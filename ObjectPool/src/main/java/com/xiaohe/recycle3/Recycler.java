@@ -120,9 +120,9 @@ public abstract class Recycler<T> {
     /**
      * 此对象池帮助别的线程回收的对象（其实没有回收，只是暂时存放等着那个线程来拿）
      */
-    private static final FastThreadLocal<Map<Stack<?>, WeakOrderQueue>> DELAYED_RECYCLED = new FastThreadLocal<>() {
+    private static final FastThreadLocal<Map<Stack<?>, WeakOrderQueue>> DELAYED_RECYCLED = new FastThreadLocal<Map<Stack<?>, WeakOrderQueue>>() {
         @Override
-        protected Object initialValue() throws Exception {
+        protected Map initialValue() throws Exception {
             return new WeakHashMap<Stack<?>, WeakOrderQueue>();
         }
     };
